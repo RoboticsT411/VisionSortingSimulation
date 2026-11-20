@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vision Sorting Simulator</title>
+<script src="coi-serviceworker.js"></script>
+<script type="importmap">{ "imports": { "three": "./lib/three.module.js", "three/addons/": "./lib/addons/" } }</script>
+<script src="lib/fflate.min.js"></script>
+<style>
+  :root { --bg: #f3f4f6; --panel: #ffffff; --ink: #1f2328; --quiet: #5f6670; --line: #d4d8de; --accent: #1f5fae; --err: #b3261e; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font: 14px system-ui, Segoe UI, Arial, sans-serif; }
+  header { display: flex; align-items: center; gap: 10px; padding: 6px 12px; background: #1d2b3f; color: #fff; flex-wrap: wrap; }
+  header h1 { font-size: 16px; margin: 0 12px 0 0; font-weight: 600; }
+  header select, header input, header button { font: inherit; padding: 4px 8px; border-radius: 4px; border: 1px solid #50607a; }
+  header button { background: #2e6fc4; color: #fff; border-color: #2e6fc4; cursor: pointer; }
+  header button:disabled { opacity: .45; cursor: default; }
+  header #stop { background: #b3261e; border-color: #b3261e; }
+  header .ghost { background: transparent; border-color: #50607a; }
+  #status { color: #c7d2e2; margin-left: auto; }
+  #runlabel { color: #ffd479; }
+  main { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(360px, 1fr); height: calc(100% - 46px); }
+  #left { display: flex; flex-direction: column; min-width: 0; border-right: 1px solid var(--line); }
+  #view { flex: 1; min-height: 240px; position: relative; outline: none; }
+  #view canvas { display: block; }
+  #event { position: absolute; left: 10px; bottom: 10px; background: rgba(20,30,45,.82); color: #fff; padding: 5px 10px; border-radius: 4px; font-size: 13px; pointer-events: none; max-width: 70%; }
+  #event:empty { display: none; }
+  #event.flash { animation: flash 1.2s; }
+  @keyframes flash { from { background: #2e6fc4; } }
+  #previewbox { position: absolute; right: 10px; top: 10px; background: #000; border: 2px solid #fff; box-shadow: 0 1px 6px rgba(0,0,0,.4); }
+  #previewbox span { position: absolute; left: 4px; top: 2px; color: #fff; font-size: 11px; text-shadow: 0 0 3px #000; }
+  #controls { padding: 8px 10px; background: var(--panel); border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 6px; }
+  #controls .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  #controls button, #controls select, #controls input { font: inherit; font-size: 13px; padding: 3px 7px; }
+  .chip { border: 1px solid #0003; border-radius: 12px; color: #111; cursor: pointer; min-width: 52px; }
+  .chip:nth-child(7) { color: #fff; }
+  #right { display: flex; flex-direction: column; min-width: 0; background: var(--panel); }
+  #tabs { display: flex; border-bottom: 1px solid var(--line); }
+  #tabs button { border: 0; background: none; padding: 8px 14px; font: inherit; cursor: pointer; color: var(--quiet); border-bottom: 2px solid transparent; }
+  #tabs button.on { color: var(--ink); border-bottom-color: var(--accent); font-weight: 600; }
+  .pane { flex: 1; flex-direction: column; min-height: 0; }
+  #term { flex: 1; margin: 0; padding: 8px; overflow: auto; font: 12.5px Consolas, Menlo, monospace; white-space: pre-wrap; background: #0f1720; color: #dfe6ee; }
+  #term .err { color: #ff8c84; } #term .meta { color: #7fb0ff; } #term .echo { color: #ffd479; }
+  #inputrow { display: none; padding: 4px 8px; background: #1a2533; gap: 6px; align-items: center; color: #ffd479; }
+  #inputrow.active { display: flex; }
+  #inputrow input { flex: 1; font: 13px Consolas, monospace; padding: 4px; }
+  #pane-files { display: none; }
+  #filewrap { display: flex; flex: 1; min-height: 0; }
+  #files { list-style: none; margin: 0; padding: 4px 0; width: 200px; overflow: auto; border-right: 1px solid var(--line); font-size: 12.5px; }
+  #files li { padding: 2px 8px; cursor: pointer; white-space: pre; overflow: hidden; text-overflow: ellipsis; }
+  #files li:hover { background: #eef3fb; } #files li.cur { background: #dbe7f8; } #files li.dir { color: var(--quiet); }
+  #editwrap { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  #edithead { display: flex; gap: 6px; align-items: center; padding: 4px 8px; border-bottom: 1px solid var(--line); font-size: 13px; }
+  #editname { flex: 1; color: var(--quiet); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #editor { flex: 1; border: 0; resize: none; padding: 8px; font: 12.5px Consolas, Menlo, monospace; tab-size: 4; outline: none; white-space: pre; }
+  #imgview { display: none; max-width: 100%; margin: 8px; }
+  #pane-help { display: none; overflow: auto; padding: 4px 16px 16px; line-height: 1.45; }
+  #pane-help h3 { margin: 14px 0 4px; font-size: 15px; } #pane-help li { margin: 2px 0; }
+  #windows { position: fixed; inset: 46px 0 0 0; pointer-events: none; z-index: 20; }
+  .pwin { position: absolute; pointer-events: auto; background: #f0f0f0; border: 1px solid #7a8594; box-shadow: 0 6px 24px rgba(0,0,0,.35); border-radius: 4px; max-width: calc(100vw - 30px); outline: none; }
+  .pwin:focus-within, .pwin:focus { border-color: var(--accent); box-shadow: 0 6px 24px rgba(0,0,0,.35), 0 0 0 2px #2e6fc480; }
+  .pbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 3px 4px 3px 10px; background: #dfe3e8; cursor: move; font-size: 13px; user-select: none; }
+  .pbar button { border: 0; background: none; font-size: 18px; cursor: pointer; line-height: 1; padding: 0 6px; }
+  .pbar button:hover { background: #c42b1c; color: #fff; }
+  .cvwin canvas { display: block; width: auto; height: auto; max-width: min(1000px, calc(100vw - 40px)); max-height: calc(100vh - 120px); cursor: crosshair; }
+  .cvhint { font-size: 11px; color: var(--quiet); padding: 2px 6px; }
+  .tkwin .pbody { padding: 4px; font: 13px Arial, sans-serif; color: #000; max-height: calc(100vh - 80px); overflow: auto; }
+  .tkwin fieldset { border: 1px solid #b9b9b9; margin: 0; padding: 4px 6px; }
+  .tkwin legend { font-size: 12px; }
+  .tklabel { white-space: pre-wrap; }
+  .tkbutton { font: inherit; padding: 3px 8px; margin: 1px; white-space: pre-line; cursor: pointer; }
+  .tkentry { font: 12px Arial; padding: 2px 3px; border: 1px solid #8a8a8a; }
+  .tktext { overflow: auto; white-space: pre-wrap; background: #fff; border: 1px solid #8a8a8a; padding: 3px; font: 12px Consolas, monospace; }
+  .tkradio { display: flex; align-items: center; gap: 2px; font-size: 12px; cursor: pointer; }
+  .tkdisabled { opacity: .5; }
+  .modal { position: fixed; inset: 0; background: rgba(0,0,0,.25); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+  .mbox { background: #fff; min-width: 320px; max-width: 520px; border-radius: 6px; box-shadow: 0 10px 40px rgba(0,0,0,.4); overflow: hidden; }
+  .mtitle { background: #dfe3e8; padding: 6px 12px; font-weight: 600; }
+  .mtext { padding: 14px 16px; white-space: pre-wrap; }
+  .mbox.error .mtitle { background: #f6d5d2; } .mbox.warning .mtitle { background: #fbe7c4; }
+  .mbtns { display: flex; justify-content: flex-end; gap: 8px; padding: 8px 12px; background: #f5f6f8; }
+  .mbtns button { min-width: 80px; padding: 5px 10px; font: inherit; }
+  #voicebox { display: none; position: fixed; right: 14px; bottom: 14px; z-index: 900; background: #1d2b3f; color: #fff; padding: 8px 10px; border-radius: 6px; gap: 8px; align-items: center; flex-wrap: wrap; max-width: 420px; font-size: 13px; }
+  #voicebox input { flex: 1; min-width: 160px; font: inherit; padding: 3px 6px; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; grid-template-rows: 60% 40%; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Project 1 · Vision sorting simulator</h1>
+  <select id="program" title="Program to run"></select>
+  <input id="args" placeholder="options, e.g. --dry-run" size="16" title="Command-line options">
+  <button id="run" disabled>Run</button>
+  <button id="stop" disabled title="Stop the program (as Ctrl+C)">Stop</button>
+  <span id="runlabel"></span>
+  <span id="status">Loading...</span>
+  <button id="restart" class="ghost" title="Restart Python">Restart Python</button>
+</header>
+<main>
+  <section id="left">
+    <div id="view" title="Drag to turn the view, right-drag to pan, wheel to zoom. Drag a cube to move it; wheel over a cube to turn it; double-click a cube to remove it.">
+      <div id="previewbox"><canvas id="preview" width="320" height="180"></canvas><span>station camera</span></div>
+      <div id="event"></div>
+    </div>
+    <div id="controls">
+      <div class="row"><b>Add a cube:</b><span id="chips" class="row"></span><button id="addother" title="A pen, coin, eraser or roll of tape: for the 'other' class">+ other object</button></div>
+      <div class="row">
+        <button id="random">New random scene</button>
+        <select id="ncubes"><option>3</option><option>6</option><option selected>9</option></select> cubes
+        <label><input type="checkbox" id="sorted" checked> mostly red, yellow, green</label>
+        <button id="clearzone">Clear the zone</button>
+        <button id="emptysq">Empty squares A, B, C</button>
+      </div>
+      <div class="row">
+        Lighting <select id="light"><option value="closed">Blinds closed</option><option value="open">Blinds open</option><option value="lamp">Desk lamp (lighting test)</option></select>
+        <label><input type="checkbox" id="hand"> Hand in view</label>
+        Robot speed <select id="speed"><option value="1">Real</option><option value="3">3×</option><option value="10">10×</option></select>
+        <label title="A program stopped without closing its connection blocks the robot for 15 s, as on the real robot"><input type="checkbox" id="problems" checked> Real-robot connection rules</label>
+      </div>
+    </div>
+  </section>
+  <section id="right">
+    <div id="tabs"><button id="tab-terminal" class="on">Terminal</button><button id="tab-files">Files and editor</button><button id="tab-help">How to use</button></div>
+    <div id="pane-terminal" class="pane" style="display:flex">
+      <pre id="term"></pre>
+      <div id="inputrow">input&gt; <input id="terminput" autocomplete="off"></div>
+    </div>
+    <div id="pane-files" class="pane">
+      <div id="filewrap">
+        <ul id="files"></ul>
+        <div id="editwrap">
+          <div id="edithead"><span id="editname">Choose a file</span><button id="save">Save (Ctrl+S)</button></div>
+          <textarea id="editor" spellcheck="false"></textarea>
+          <img id="imgview" alt="">
+        </div>
+      </div>
+      <div id="edithead" style="border-top:1px solid var(--line)">
+        <button id="download">Download project (.zip)</button>
+        <label>Upload .zip <input type="file" id="upload" accept=".zip"></label>
+        <button id="resetcode">Put back the original program files</button>
+      </div>
+    </div>
+    <div id="pane-help" class="pane">
+      <h3>What this is</h3>
+      <p>The lab station for Project 1 in your browser: a Niryo One, the platform with its four markers, squares A, B and C, foam cubes and the camera. The project's Python programs run here unchanged, in the browser, with the same windows, keys and robot commands as in the lab.</p>
+      <h3>Running a program</h3>
+      <ol>
+        <li>Choose the program at the top (they are in step order), add options if needed (for example <code>--dry-run</code>) and press <b>Run</b>.</li>
+        <li>Windows open on top of the page. Click a camera picture before pressing a key: as in the lab, it only receives keys when selected.</li>
+        <li><b>Stop</b> works like Ctrl+C. <b>Restart Python</b> is for a program that does not stop.</li>
+      </ol>
+      <h3>Editing your code</h3>
+      <p>Open <b>Files and editor</b>, choose a file, edit it and press Ctrl+S. Your files, dataset, model and results are kept in this browser. Use <b>Download project</b> to keep a copy or to move it to a lab PC.</p>
+      <h3>The station</h3>
+      <ul>
+        <li>Drag the view to turn it, right-drag to pan, wheel to zoom.</li>
+        <li>Drag a cube to move it, use the wheel over a cube to turn it, double-click it to remove it.</li>
+        <li><b>Learning mode</b> (steps 1.1 and 1.4): drag on the platform to move the gripper; click the 3D view, then use the arrow keys (Shift = 5 mm), PgUp and PgDn for height, and [ ] to turn.</li>
+        <li>The camera behaves like the lab's: automatic exposure and colour change when a hand or the arm is in view, and the focus hunts until step 1.3 locks it.</li>
+        <li>Use <b>Desk lamp</b> for the lighting test in step 3 (collect it with <code>--dataset dataset_lighting2</code>).</li>
+      </ul>
+      <h3>Differences from the lab</h3>
+      <ul>
+        <li>Choose the robot <b>Simulator</b> in step 1.1; its Lab 5 positions can be loaded.</li>
+        <li>Voice commands use the browser's speech recognition (Chrome or Edge), or words typed in the voice box.</li>
+        <li>The simulated pictures are cleaner than the real camera: expect higher accuracy here than in the lab. Final results for your report come from the real station.</li>
+      </ul>
+    </div>
+  </section>
+</main>
+<div id="windows"></div>
+<div id="voicebox"><b>Voice</b><span id="voicestate"></span><input id="voicetype" placeholder="or type a word, Enter"></div>
+<script type="module" src="app.js"></script>
+</body>
+</html>
