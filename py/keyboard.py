@@ -25,6 +25,11 @@ def _next(block=True):
         bb.poll()
         if q:
             ev = q.popleft()
+            # A held key repeats. The robot moves slower than the repeats arrive, so once the key
+            # is let go, the repeats still waiting are dropped: the robot stops when you stop pressing.
+            if ev["event"] == KEY_DOWN and ev.get("repeat") and any(
+                    e["event"] == KEY_UP and e["name"] == ev["name"] for e in q):
+                continue
             name, kind = ev["name"], ev["event"]
             (_down.add if kind == KEY_DOWN else _down.discard)(name)
             return KeyboardEvent(kind, name)

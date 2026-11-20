@@ -7,6 +7,18 @@
 <script src="coi-serviceworker.js"></script>
 <script type="importmap">{ "imports": { "three": "./lib/three.module.js", "three/addons/": "./lib/addons/" } }</script>
 <script src="lib/fflate.min.js"></script>
+<link rel="stylesheet" href="lib/codemirror/codemirror.css"><link rel="stylesheet" href="lib/codemirror/lint.css"><link rel="stylesheet" href="lib/codemirror/dialog.css">
+<script src="lib/codemirror/codemirror.js"></script>
+<script src="lib/codemirror/python.js"></script>
+<script src="lib/codemirror/lint.js"></script>
+<script src="lib/codemirror/matchbrackets.js"></script>
+<script src="lib/codemirror/closebrackets.js"></script>
+<script src="lib/codemirror/active-line.js"></script>
+<script src="lib/codemirror/comment.js"></script>
+<script src="lib/codemirror/dialog.js"></script>
+<script src="lib/codemirror/searchcursor.js"></script>
+<script src="lib/codemirror/search.js"></script>
+<script src="lib/codemirror/jump-to-line.js"></script>
 <style>
   :root { --bg: #f3f4f6; --panel: #ffffff; --ink: #1f2328; --quiet: #5f6670; --line: #d4d8de; --accent: #1f5fae; --err: #b3261e; }
   * { box-sizing: border-box; }
@@ -29,6 +41,14 @@
   #event.flash { animation: flash 1.2s; }
   @keyframes flash { from { background: #2e6fc4; } }
   #previewbox { position: absolute; right: 10px; top: 10px; background: #000; border: 2px solid #fff; box-shadow: 0 1px 6px rgba(0,0,0,.4); }
+  #previewbox button { position: absolute; right: 2px; top: 2px; border: 0; background: rgba(0,0,0,.55); color: #fff; font-size: 14px; line-height: 1; padding: 2px 6px; cursor: pointer; border-radius: 3px; }
+  #showcam { position: absolute; right: 10px; top: 10px; display: none; font-size: 12px; padding: 3px 8px; }
+  #view.nocam #previewbox { display: none; } #view.nocam #showcam { display: block; }
+  #controls .hint { color: #555; font-size: 12px; }
+  #jointsliders { display: grid; grid-template-columns: 52px 1fr 92px; gap: 2px 8px; align-items: center; font-size: 12.5px; margin: 6px 0; max-width: 620px; }
+  #jointsliders input { width: 100%; padding: 0; }
+  #jointsliders .val { font-family: Consolas, monospace; text-align: right; }
+  #jointbox.locked #jointsliders { opacity: .45; }
   #previewbox span { position: absolute; left: 4px; top: 2px; color: #fff; font-size: 11px; text-shadow: 0 0 3px #000; }
   #controls { padding: 8px 10px; background: var(--panel); border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 6px; }
   #controls .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
@@ -47,13 +67,20 @@
   #inputrow input { flex: 1; font: 13px Consolas, monospace; padding: 4px; }
   #pane-files { display: none; }
   #filewrap { display: flex; flex: 1; min-height: 0; }
-  #files { list-style: none; margin: 0; padding: 4px 0; width: 200px; overflow: auto; border-right: 1px solid var(--line); font-size: 12.5px; }
+  #filecol { width: 210px; display: flex; flex-direction: column; border-right: 1px solid var(--line); min-height: 0; }
+  #filebtns { display: flex; flex-wrap: wrap; gap: 3px; padding: 4px; border-bottom: 1px solid var(--line); }
+  #filebtns button { font-size: 11.5px; padding: 2px 6px; }
+  #files { list-style: none; margin: 0; padding: 4px 0; flex: 1; overflow: auto; font-size: 12.5px; }
   #files li { padding: 2px 8px; cursor: pointer; white-space: pre; overflow: hidden; text-overflow: ellipsis; }
-  #files li:hover { background: #eef3fb; } #files li.cur { background: #dbe7f8; } #files li.dir { color: var(--quiet); }
+  #files li:hover { background: #eef3fb; } #files li.cur { background: #dbe7f8; } #files li.dir { color: #3a4a5c; font-weight: 600; } #files li.drop, #files.drop { outline: 2px dashed #3b82f6; background: #e8f0fe; }
   #editwrap { flex: 1; display: flex; flex-direction: column; min-width: 0; }
   #edithead { display: flex; gap: 6px; align-items: center; padding: 4px 8px; border-bottom: 1px solid var(--line); font-size: 13px; }
   #editname { flex: 1; color: var(--quiet); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  #editor { flex: 1; border: 0; resize: none; padding: 8px; font: 12.5px Consolas, Menlo, monospace; tab-size: 4; outline: none; white-space: pre; }
+  #editor { flex: 1; min-height: 0; position: relative; }
+  #editor .CodeMirror { position: absolute; inset: 0; height: auto; font: 12.5px Consolas, Menlo, monospace; }
+  .CodeMirror-activeline-background { background: #f3f6fb; }
+  #lintsum { font-size: 12px; margin-left: 8px; color: #555; }
+  #lintsum .e { color: #c62828; font-weight: 600; } #lintsum .w { color: #a66b00; }
   #imgview { display: none; max-width: 100%; margin: 8px; }
   #pane-help { display: none; overflow: auto; padding: 4px 16px 16px; line-height: 1.45; }
   #pane-help h3 { margin: 14px 0 4px; font-size: 15px; } #pane-help li { margin: 2px 0; }
@@ -100,15 +127,17 @@
 <main>
   <section id="left">
     <div id="view" title="Drag to turn the view, right-drag to pan, wheel to zoom. Drag a cube to move it; wheel over a cube to turn it; double-click a cube to remove it.">
-      <div id="previewbox"><canvas id="preview" width="320" height="180"></canvas><span>station camera</span></div>
+      <div id="previewbox"><canvas id="preview" width="320" height="180"></canvas><span>station camera</span><button id="hidecam" title="Hide the camera picture">×</button></div>
+      <button id="showcam" title="Show the station camera picture">Show camera</button>
       <div id="event"></div>
     </div>
     <div id="controls">
-      <div class="row"><b>Add a cube:</b><span id="chips" class="row"></span><button id="addother" title="A pen, coin, eraser or roll of tape: for the 'other' class">+ other object</button></div>
+      <div class="row"><b>Add a cube</b> to <select id="addwhere" title="Where a new cube goes: the pick zone, or straight into hole A, B or C (up to 3 per hole)"><option value="zone">the zone</option><option value="A">hole A</option><option value="B">hole B</option><option value="C">hole C</option></select>:<span id="chips" class="row"></span><button id="addother" title="A ball, bottle cap, toy brick or roll of tape: for the 'other' class">+ other object</button></div>
       <div class="row">
         <button id="random">New random scene</button>
         <select id="ncubes"><option>3</option><option>6</option><option selected>9</option></select> cubes
         <label><input type="checkbox" id="sorted" checked> mostly red, yellow, green</label>
+        <label title="New cubes are placed at a random angle instead of square to the board"><input type="checkbox" id="turned"> turned cubes</label>
         <button id="clearzone">Clear the zone</button>
         <button id="emptysq">Empty squares A, B, C</button>
       </div>
@@ -118,6 +147,13 @@
         Robot speed <select id="speed"><option value="1">Real</option><option value="3">3×</option><option value="10">10×</option></select>
         <label title="A program stopped without closing its connection blocks the robot for 15 s, as on the real robot"><input type="checkbox" id="problems" checked> Real-robot connection rules</label>
       </div>
+      <details id="jointbox"><summary><b>Move the joints by hand</b> (teach mode)</summary>
+        <div id="jointsliders"></div>
+        <div class="row"><button id="gopen">Open gripper</button><button id="gclose">Close gripper</button><button id="gsleep" title="Joints 0, 0.55, -1.2, 0, 0, 0">Sleep position</button>
+        <span class="hint" id="jointnote">Works in learning mode (as in Lab 3 teach mode) or when no program is connected.</span></div>
+      </details>
+      <div class="row hint">Drag a cube to move it; let go over A, B or C to drop it in (up to 3 high). Scroll over a cube to turn it (Shift = 15°), or click it and use
+        <button id="turnl" title="Turn the clicked cube 15° anticlockwise">⟲ 15°</button><button id="turnr" title="Turn the clicked cube 15° clockwise">⟳ 15°</button>. Double-click removes it.</div>
     </div>
   </section>
   <section id="right">
@@ -128,10 +164,10 @@
     </div>
     <div id="pane-files" class="pane">
       <div id="filewrap">
-        <ul id="files"></ul>
+        <div id="filecol"><div id="filebtns"><button id="newfile" title="New file in the selected folder">+ File</button><button id="newfolder" title="New folder">+ Folder</button><button id="renamefile" title="Rename or move the selected file or folder">Rename</button><button id="deletefile" title="Delete the selected file or folder">Delete</button></div><ul id="files"></ul></div>
         <div id="editwrap">
-          <div id="edithead"><span id="editname">Choose a file</span><button id="save">Save (Ctrl+S)</button></div>
-          <textarea id="editor" spellcheck="false"></textarea>
+          <div id="edithead"><span id="editname">Choose a file</span><span id="lintsum"></span><button id="save">Save (Ctrl+S)</button></div>
+          <div id="editor"></div>
           <img id="imgview" alt="">
         </div>
       </div>
@@ -151,11 +187,13 @@
         <li><b>Stop</b> works like Ctrl+C. <b>Restart Python</b> is for a program that does not stop.</li>
       </ol>
       <h3>Editing your code</h3>
-      <p>Open <b>Files and editor</b>, choose a file, edit it and press Ctrl+S. Your files, dataset, model and results are kept in this browser. Use <b>Download project</b> to keep a copy or to move it to a lab PC.</p>
+      <p>Open <b>Files and editor</b>, choose a file, edit it and press Ctrl+S. <b>+ File</b> and <b>+ Folder</b> create new ones in the selected folder (type a path such as <code>LAB-5/main.py</code> to make the folder too); <b>Rename</b> also moves, or drag a file or folder onto another folder (onto the empty space below the list for the top level); <b>Delete</b> removes the selected file or folder. A new <code>.py</code> file appears in the Run list. Your files, dataset, model and results are kept <b>in this browser only</b>: nobody else sees them, and what you add, move or delete does not change anyone else's copy. Another browser or PC starts with fresh files, and clearing the browser's site data deletes yours, so use <b>Download project</b> to keep a copy or move it to a lab PC, and <b>Upload .zip</b> to bring it back. Project 1 is in the <code>AI-VISION-SORTING</code> folder and the labs in <code>LAB-1</code> to <code>LAB-4</code>; files you delete or move stay that way, and <b>Put back the original program files</b> brings back every original file.</p>
       <h3>The station</h3>
       <ul>
         <li>Drag the view to turn it, right-drag to pan, wheel to zoom.</li>
-        <li>Drag a cube to move it, use the wheel over a cube to turn it, double-click it to remove it.</li>
+        <li>Drag a cube to move it, use the wheel over a cube to turn it (Shift = 15° steps), double-click it to remove it. Let go of a cube over hole A, B or C and it drops in; up to 3 cubes stack in each hole. "Add a cube to hole A" puts one straight in.</li>
+        <li><b>Move the joints by hand</b> opens six joint sliders and gripper buttons. They work while a program has learning mode on (Lab 3 teach mode: move the joints, then press s or g in the terminal), or when no program is connected.</li>
+        <li>Click × on the camera picture to hide it, and <b>Show camera</b> to bring it back.</li>
         <li><b>Learning mode</b> (steps 1.1 and 1.4): drag on the platform to move the gripper; click the 3D view, then use the arrow keys (Shift = 5 mm), PgUp and PgDn for height, and [ ] to turn.</li>
         <li>The camera behaves like the lab's: automatic exposure and colour change when a hand or the arm is in view, and the focus hunts until step 1.3 locks it.</li>
         <li>Use <b>Desk lamp</b> for the lighting test in step 3 (collect it with <code>--dataset dataset_lighting2</code>).</li>

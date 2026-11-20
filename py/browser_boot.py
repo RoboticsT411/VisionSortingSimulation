@@ -111,4 +111,5 @@ def run_program(file, args):
             pass
         sys.stdout.flush()
         sys.stderr.flush()
+        os.chdir(PROJECT)          # leave the program's folder, so it can be renamed or deleted
     return code

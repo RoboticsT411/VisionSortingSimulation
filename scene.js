@@ -4,8 +4,8 @@ import * as ARM from './arm.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 // ---------------------------------------------------------------- geometry (metres, robot base frame)
-// The lab board (Juan's measurements): 388 mm back to front, 259 mm across; the robot's right back
-// suction cup 30 mm from the back and right edges. Holes A, B, C (25 x 25 mm, 5 mm deep) as in the
+// The lab board (Juan's measurements): 388 mm back to front, 259 mm across, 6 mm thick; the robot's right back
+// suction cup 30 mm from the back and right edges. Holes A, B, C (25 x 25 mm, 6 mm deep) as in the
 // Niryo One browser simulator. ArUco markers on 34 mm paper, flush with the board's corners at the
 // front, 140 mm back from those (ID 0 to ID 3); 225 mm apart across, which is what the board allows.
 const BOARD_X = [-0.128, 0.260], BOARD_Y = [-0.1425, 0.1165], PAPER = 0.034;
@@ -15,7 +15,7 @@ export const GEO = {
   markers: { 3: [MX0, MY0], 2: [MX0, MY1], 0: [MX1, MY0], 1: [MX1, MY1] },
   markerMm: 24, paperMm: PAPER * 1000,
   squares: { A: [0.2095, -0.063], B: [0.2095, -0.016], C: [0.2095, 0.031] },
-  squareMm: 25, holeDepth: 0.005,
+  squareMm: 25, holeDepth: 0.006,   // holes cut through the 6 mm board
   circles: [],
   cube: 0.02,
   zone: { xmin: 0.132, xmax: 0.178, ymin: -0.098, ymax: 0.07 },   // where random cubes are placed (inside the pick zone)
@@ -82,11 +82,10 @@ function platformTexture() {
   const img = g.getImageData(0, 0, W, H);
   for (let i = 0; i < img.data.length; i += 4) { const n = (Math.random() - 0.5) * 8; img.data[i] += n; img.data[i+1] += n; img.data[i+2] += n; }
   g.putImageData(img, 0, 0);
-  // holes A, B, C: the bench shows through; the walls are in shade
+  // holes A, B, C: cut out of the picture (the board below has real holes)
   for (const [name, [x, y]] of Object.entries(GEO.squares)) {
     const [cx, cy] = P(x, y), h = GEO.squareMm * 2;
-    g.fillStyle = '#5d6a70'; g.fillRect(cx - h, cy - h, 2 * h, 2 * h);
-    g.fillStyle = '#d9d9d4'; g.fillRect(cx - h + 6, cy - h + 6, 2 * h - 12, 2 * h - 12);
+    g.clearRect(cx - h, cy - h, 2 * h, 2 * h);
     g.fillStyle = '#123'; g.font = '64px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
     const [lx, ly] = P(x + GEO.squareMm / 2000 + 0.010, y); g.save(); g.translate(lx, ly); g.fillText(name, 0, 0); g.restore();
   }
@@ -138,19 +137,21 @@ export function initScene(container, preview) {
 
   // table, mat, platform
   const table = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 1.2), new THREE.MeshStandardMaterial({ color: '#b9a98c', roughness: 0.9 }));
-  table.position.set(0.2, 0, -0.0052); table.receiveShadow = true; scene.add(table);
+  table.position.set(0.2, 0, -GEO.holeDepth - 0.0001); table.receiveShadow = true; scene.add(table);
     const s = GEO.sheet;
   const sheet = new THREE.Mesh(new THREE.PlaneGeometry(s.ymax - s.ymin, s.xmax - s.xmin),
-    new THREE.MeshStandardMaterial({ map: platformTexture(), roughness: 0.85 }));
+    new THREE.MeshStandardMaterial({ map: platformTexture(), roughness: 0.85, alphaTest: 0.5 }));
   sheet.rotation.z = Math.PI / 2; sheet.position.set((s.xmin + s.xmax) / 2, (s.ymin + s.ymax) / 2, 0);
   sheet.receiveShadow = true; scene.add(sheet);
-  const edge = new THREE.Mesh(new THREE.BoxGeometry(s.xmax - s.xmin, s.ymax - s.ymin, 0.0049), new THREE.MeshStandardMaterial({ color: '#2384b4', roughness: 0.8 }));
-  edge.position.set((s.xmin + s.xmax) / 2, (s.ymin + s.ymax) / 2, -0.00255); edge.receiveShadow = true; edge.castShadow = true; scene.add(edge);
-  // dark hole walls under the squares (cubes in a hole sit 5 mm lower)
+  // the board itself, 6 mm thick, with the square holes cut through it (the bench shows at the bottom)
+  const shape = new THREE.Shape(), T = GEO.holeDepth, h = GEO.squareMm / 2000;
+  shape.moveTo(s.xmin, s.ymin); shape.lineTo(s.xmax, s.ymin); shape.lineTo(s.xmax, s.ymax); shape.lineTo(s.xmin, s.ymax); shape.lineTo(s.xmin, s.ymin);
   for (const [x, y] of Object.values(GEO.squares)) {
-    const box = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.025, 0.005), new THREE.MeshStandardMaterial({ color: '#5d6a70' }));
-    box.position.set(x, y, -0.0026); scene.add(box);
+    const p = new THREE.Path(); p.moveTo(x - h, y - h); p.lineTo(x - h, y + h); p.lineTo(x + h, y + h); p.lineTo(x + h, y - h); p.lineTo(x - h, y - h); shape.holes.push(p);
   }
+  const board = new THREE.Mesh(new THREE.ExtrudeGeometry(shape, { depth: T - 0.0003, bevelEnabled: false }),
+    new THREE.MeshStandardMaterial({ color: '#2384b4', roughness: 0.8 }));
+  board.position.z = -T; board.receiveShadow = true; board.castShadow = true; scene.add(board);
   setLighting('closed');
   buildArm();
   hand = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.075, 0.025), new THREE.MeshStandardMaterial({ color: '#d9a07a', roughness: 0.7 }));
@@ -184,6 +185,7 @@ export function setLighting(kind) {
   lights.d.shadow.bias = -0.0005;
   scene.add(lights.h); scene.add(lights.d);
 }
+export function viewFrom(pos, look) { userCam.position.set(...pos); controls.target.set(...look); controls.update(); }
 export function setHand(on) { hand.visible = on; }
 
 // ---------------------------------------------------------------- arm
@@ -210,7 +212,7 @@ export function addCube(colour, x, y, yaw) {
 }
 function placeCube(c) { c.mesh.position.set(c.x, c.y, c.z); c.mesh.rotation.order = 'ZYX'; c.mesh.rotation.set(c.tilt, 0, c.yaw); }
 function placeHeld() { const c = robot.held, f = toolFrame(); c.x = f.G[0]; c.y = f.G[1]; c.z = f.G[2]; c.yaw = fingerYaw() + c.heldYaw; c.tilt = 0; placeCube(c); }
-export function removeCube(c) { scene.remove(c.mesh); cubes.splice(cubes.indexOf(c), 1); if (robot.held === c) robot.held = null; }
+export function removeCube(c) { if (selected === c) selected = null; scene.remove(c.mesh); cubes.splice(cubes.indexOf(c), 1); if (robot.held === c) robot.held = null; }
 const angleErr = (a, b) => { let d = ((a - b) % (Math.PI / 2) + Math.PI / 2) % (Math.PI / 2); if (d > Math.PI / 4) d -= Math.PI / 2; return d; };
 function freeSpot(margin) {
   const z = GEO.zone;
@@ -258,7 +260,34 @@ export function project(x, y, z) {
   const v = new THREE.Vector3(x, y, z || 0).project(stationCam);
   return [(v.x + 1) / 2 * target.width, (1 - v.y) / 2 * target.height];
 }
-export function addCubeRandom(colour) { const p = freeSpot(); if (!p) return null; return addCube(colour, p[0], p[1], (Math.random() - 0.5) * Math.PI / 2); }
+// New cubes stand square to the board unless "turned cubes" is on (as students place them)
+export const options = { turned: false };
+export function addCubeRandom(colour) { const p = freeSpot(); if (!p) return null; return addCube(colour, p[0], p[1], options.turned ? (Math.random() - 0.5) * Math.PI / 2 : 0); }
+// Put a cube straight into hole A, B or C (stacks of up to 3)
+function placeOnSquare(c, sq) {
+  const level = stackCount(sq) + 1; if (level > 3) return false;
+  const [x, y] = GEO.squares[sq];
+  c.slot = { sq, level }; c.x = x; c.y = y; c.yaw = 0; c.tilt = 0;
+  c.z = -GEO.holeDepth + GEO.cube / 2 + (level - 1) * GEO.cube; placeCube(c);
+  return true;
+}
+export function addCubeTo(colour, where) {
+  if (!where || where === 'zone') return addCubeRandom(colour);
+  const c = addCube(colour, 0, 0, 0);
+  if (!placeOnSquare(c, where)) { removeCube(c); changed(`Square ${where} already has 3 cubes.`); return null; }
+  changed(`A ${colour} cube is on square ${where}, level ${c.slot.level}.`); return c;
+}
+let selected = null;
+function select(c) {
+  if (selected && selected.mesh.material && selected.mesh.material.emissive) selected.mesh.material.emissive.setHex(0);
+  selected = c;
+  if (c && c.mesh.material && c.mesh.material.emissive) c.mesh.material.emissive.setHex(0x222222);
+}
+export function turnSelected(deg) {
+  const c = selected; if (!c || c.slot || !cubes.includes(c)) { changed('Click a cube in the zone first, then turn it.'); return; }
+  c.yaw += deg * Math.PI / 180; placeCube(c);
+}
+const topOfStack = c => !c.slot || stackCount(c.slot.sq) === c.slot.level;
 export function randomScene(n, colours) {
   clearZone(); for (let i = 0; i < n; i++) addCubeRandom(colours[Math.floor(Math.random() * colours.length)]);
 }
@@ -461,6 +490,15 @@ export function programEnded() {
 }
 
 // ---------------------------------------------------------------- learning mode: move the gripper by hand
+// Joint sliders (teach by hand): like moving the arm in learning mode, one joint at a time.
+// Allowed when learning mode is on or no program is connected, and never while the arm is moving.
+export const JOINT_LIMITS = ARM.CHAIN.map(c => c[3]);
+export function canJog() { return !robot.anim && (robot.learning || !robot.connected); }
+export function setJoint(i, v) {
+  if (!canJog()) return false;
+  const [lo, hi] = JOINT_LIMITS[i]; robot.joints = robot.joints.slice(); robot.joints[i] = Math.max(lo, Math.min(hi, v)); updateArm(); return true;
+}
+export async function handGripper(open) { if (!canJog()) return false; await gripper(open); return true; }
 export function jog(dx, dy, dz, dyaw) {
   const p = currentPose(), R = mul(rz(dyaw || 0), rpyToMat(p[3], p[4], p[5]));
   const j = ik([p[0] + dx, p[1] + dy, p[2] + dz], R); if (j) { robot.joints = j; updateArm(); }
@@ -482,23 +520,36 @@ function setupPointer(el) {
   el.addEventListener('pointerdown', e => {
     if (e.button !== 0) return; pick(e);
     if (robot.learning) { const p = onPlane(); if (p) { drag = { kind: 'arm' }; controls.enabled = false; moveGripperTo(p.x, p.y); } return; }
-    const hits = ray.intersectObjects(cubes.filter(c => !c.slot && c !== robot.held).map(c => c.mesh), true);
-    if (hits.length) { const c = hits[0].object.userData.cube; drag = { kind: 'cube', c }; controls.enabled = false; }
+    const hits = ray.intersectObjects(cubes.filter(c => topOfStack(c) && c !== robot.held).map(c => c.mesh), true);
+    if (hits.length) { const c = hits[0].object.userData.cube; select(c); drag = { kind: 'cube', c }; controls.enabled = false; }
   });
   el.addEventListener('pointermove', e => {
     if (!drag) return; pick(e); const p = onPlane(drag.kind === 'cube' ? 0.01 : 0); if (!p) return;
     if (drag.kind === 'arm') moveGripperTo(p.x, p.y);
-    else { drag.c.x = p.x; drag.c.y = p.y; if (!drag.c.shape) { drag.c.z = GEO.cube / 2; drag.c.tilt = 0; } placeCube(drag.c); }
+    else { const c = drag.c; c.slot = null; c.x = p.x; c.y = p.y; if (!c.shape) { c.z = GEO.cube / 2; c.tilt = 0; } else c.z = Math.max(c.z, 0.005); placeCube(c); drag.moved = true; }
   });
-  window.addEventListener('pointerup', () => { drag = null; controls.enabled = true; });
+  window.addEventListener('pointerup', () => {
+    if (drag && drag.kind === 'cube' && drag.moved && !drag.c.shape) {
+      // let go over hole A, B or C: it drops in, or onto the stack there
+      const c = drag.c;
+      for (const [sq, [x, y]] of Object.entries(GEO.squares)) {
+        if (Math.hypot(c.x - x, c.y - y) < 0.018) {
+          if (placeOnSquare(c, sq)) changed(`The ${c.colour} cube is on square ${sq}, level ${c.slot.level}.`);
+          else { c.x = x - 0.04; placeCube(c); changed(`Square ${sq} already has 3 cubes.`); }
+          break;
+        }
+      }
+    }
+    drag = null; controls.enabled = true;
+  });
   el.addEventListener('wheel', e => {
-    pick(e); const hits = ray.intersectObjects(cubes.filter(c => !c.slot).map(c => c.mesh));
-    if (hits.length && e.shiftKey === false && e.altKey === false) {
-      const c = hits[0].object.userData.cube; c.yaw += (e.deltaY > 0 ? 1 : -1) * 5 * Math.PI / 180; placeCube(c);
+    pick(e); const hits = ray.intersectObjects(cubes.filter(c => !c.slot).map(c => c.mesh), true);
+    if (hits.length && !e.altKey) {
+      const c = hits[0].object.userData.cube; select(c); c.yaw += (e.deltaY > 0 ? 1 : -1) * (e.shiftKey ? 15 : 5) * Math.PI / 180; placeCube(c);
       e.preventDefault(); e.stopImmediatePropagation();
     }
   }, { capture: true, passive: false });
-  el.addEventListener('dblclick', e => { pick(e); const hits = ray.intersectObjects(cubes.filter(c => !c.slot).map(c => c.mesh)); if (hits.length) removeCube(hits[0].object.userData.cube); });
+  el.addEventListener('dblclick', e => { pick(e); const hits = ray.intersectObjects(cubes.filter(c => topOfStack(c)).map(c => c.mesh), true); if (hits.length) removeCube(hits[0].object.userData.cube); });
   el.tabIndex = 0;
   el.addEventListener('keydown', e => {
     if (!robot.learning) return; const s = e.shiftKey ? 0.005 : 0.001, map = { ArrowUp: [-s, 0, 0], ArrowDown: [s, 0, 0], ArrowLeft: [0, -s, 0], ArrowRight: [0, s, 0], PageUp: [0, 0, s], PageDown: [0, 0, -s] };
